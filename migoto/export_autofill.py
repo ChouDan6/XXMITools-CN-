@@ -1,12 +1,13 @@
 import bpy
+import traceback
 
 # =============================================================================
 # 1. 核心操作类：全场景自动替换导出
 # =============================================================================
 class XXMI_OT_ExportWithAutoFill(bpy.types.Operator):
     bl_idname = "xxmi.export_with_autofill"
-    bl_label = "Export All Visible (Auto-Fill VGs)"
-    bl_description = "Process ALL VISIBLE meshes (Fill VGs, Sort), export them, and restore state."
+    bl_label = "导出可见模型 (自动补全顶点组)"
+    bl_description = "处理当前场景所有可见的网格（补全缺失的顶点组序号并排序），然后调用导出器，最后还原场景。"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -17,14 +18,17 @@ class XXMI_OT_ExportWithAutoFill(bpy.types.Operator):
         
         # 记录并强制修改插件的导出设置
         scene = context.scene
+        if not hasattr(scene, "xxmi"):
+             self.report({'ERROR'}, "未找到 XXMI 插件设置，请确保插件已正确加载。")
+             return {'CANCELLED'}
+             
         xxmi_settings = scene.xxmi
         
         # 记录原始设置
         original_only_selected_setting = xxmi_settings.only_selected
         original_ignore_hidden_setting = xxmi_settings.ignore_hidden
         
-        # 强制设置为：仅导出选中 + 不忽略隐藏 (因为我们会手动控制可见性)
-        # 逻辑：我们将只选中临时物体，所以开启 only_selected 能确保只导出临时物体
+        # 强制设置为：仅导出选中 (因为我们将手动选中处理后的临时物体)
         xxmi_settings.only_selected = True 
         
         # 确保处于物体模式
@@ -36,17 +40,16 @@ class XXMI_OT_ExportWithAutoFill(bpy.types.Operator):
         
         try:
             # --- 1. 扫描目标：当前场景所有可见的网格 ---
-            # 逻辑：用户希望导出“当前显示的”，所以我们遍历 view_layer.objects 并检查 visible_get()
             target_objects = [
                 obj for obj in context.view_layer.objects 
                 if obj.type == 'MESH' and obj.visible_get()
             ]
             
             if not target_objects:
-                self.report({'ERROR'}, "No visible meshes found in the scene to export.")
+                self.report({'ERROR'}, "场景中没有可见的网格物体可导出。")
                 return {'CANCELLED'}
 
-            self.report({'INFO'}, f"Processing {len(target_objects)} visible meshes...")
+            self.report({'INFO'}, f"正在处理 {len(target_objects)} 个可见网格...")
 
             # --- 2. 偷天换日：创建替身 ---
             for obj in target_objects:
@@ -115,18 +118,17 @@ class XXMI_OT_ExportWithAutoFill(bpy.types.Operator):
                 context.view_layer.objects.active = processed_pairs[0][1]
 
             # --- 5. 调用原始导出器 ---
-            self.report({'INFO'}, "Invoking Original Exporter on Processed Meshes...")
+            self.report({'INFO'}, "正在调用原始导出器...")
             
             # 调用插件原本的导出命令
             # 因为 xxmi_settings.only_selected = True，且只有临时物体被选中
             # 导出器会认为这些临时物体就是我们要导出的内容
             bpy.ops.xxmi.exportadvanced('INVOKE_DEFAULT')
             
-            self.report({'INFO'}, "Export Successful!")
+            self.report({'INFO'}, "导出流程完成！")
             
         except Exception as e:
-            self.report({'ERROR'}, f"Auto-Fill Export Failed: {str(e)}")
-            import traceback
+            self.report({'ERROR'}, f"自动填充导出失败: {str(e)}")
             traceback.print_exc()
             
         finally:
@@ -145,13 +147,13 @@ class XXMI_OT_ExportWithAutoFill(bpy.types.Operator):
                     if temp_mesh:
                         bpy.data.meshes.remove(temp_mesh, do_unlink=True)
                 except:
-                    print(f"Warning: Failed to delete temp object {original_name}")
+                    print(f"警告: 删除临时物体失败 {original_name}")
 
                 # 2. 还原原始物体名字
                 try:
                     orig_obj.name = original_name
                 except:
-                    print(f"Warning: Failed to rename original object back to {original_name}")
+                    print(f"警告: 还原原始物体名称失败 {original_name}")
 
             # B. 恢复原始选择状态
             try:
@@ -180,12 +182,12 @@ class XXMI_OT_ExportWithAutoFill(bpy.types.Operator):
 # =============================================================================
 class XXMI_PT_AutoFillPanel(bpy.types.Panel):
     """Creates a separate panel for Auto-Fill Export"""
-    bl_label = "Advanced Export (Auto-Fill)"
+    bl_label = "自动补充顶点组导出"
     bl_idname = "XXMI_PT_AutoFillPanel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_parent_id = "XXMI_PT_Sidebar" 
-    bl_order = 100
+    bl_order = 99
 
     def draw(self, context):
         layout = self.layout
@@ -193,13 +195,13 @@ class XXMI_PT_AutoFillPanel(bpy.types.Panel):
         # 安全获取属性
         if hasattr(context.scene, "xxmi"):
             xxmi = context.scene.xxmi
+            # 检查是否有导出动作被勾选
             if not xxmi.write_buffers and not xxmi.write_ini and not xxmi.copy_textures:
-                layout.label(text="Configure Export Settings first", icon="INFO")
+                layout.label(text="请先配置导出设置", icon="INFO")
                 layout.enabled = False
         
         row = layout.row()
         row.scale_y = 1.5
-        # [FIX] 使用通用图标 INFO 替代 SHIELD，避免 TypeError
-        row.operator("xxmi.export_with_autofill", text="Export Visible (Auto-Fill VGs)", icon='ARMATURE_DATA')
+        row.operator("xxmi.export_with_autofill", text="导出可见模型", icon='ARMATURE_DATA')
         
-        layout.label(text="* Auto-fills 0-Max VGs & Sorts", icon="INFO")
+        layout.label(text="* 自动补全 0-Max 顶点组并排序", icon="INFO")
