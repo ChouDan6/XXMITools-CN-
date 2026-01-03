@@ -1,8 +1,8 @@
 {% extends "base.ini.j2" %}
 
 {% block constantscredit %}
-    {% if credit != "" %}
-        [Constants]
+    [Constants]
+	{% if credit != "" %}
         global $active = 0
         global $creditinfo = 0
 
@@ -77,6 +77,7 @@
             hash = {{ component.ib }}
             match_first_index = {{ part.first_index }}
             ib = Resource{{ part.fullname }}IB
+            {# 下面这一行结尾的 -% 会消除它自己占据的空行，但开头的 {% 不会吃掉上一行的 ib #}
             {% set normal_maps = part.textures | selectattr("name", "equalto", "NormalMap") | list -%}
             
             {% if normal_maps | length > 0 -%}
